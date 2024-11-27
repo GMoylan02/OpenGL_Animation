@@ -50,6 +50,8 @@ struct MyBot {
 	GLuint lightPositionID;
 	GLuint lightIntensityID;
 	GLuint programID;
+	GLuint jointIndicesID;
+	GLuint jointWeightsID;
 
 	tinygltf::Model model;
 
@@ -88,6 +90,7 @@ struct MyBot {
 		std::vector<SamplerObject> samplers;	// Animation data
 	};
 	std::vector<AnimationObject> animationObjects;
+	std::vector<glm::mat4> globalTransforms;
 
 	glm::mat4 getNodeTransform(const tinygltf::Node& node) {
 		glm::mat4 transform(1.0f); 
@@ -163,20 +166,22 @@ struct MyBot {
 
 			skinObject.globalJointTransforms.resize(skin.joints.size());
 			skinObject.jointMatrices.resize(skin.joints.size());
-
-			// ----------------------------------------------
-			// TODO: double check this code later
-			// ----------------------------------------------
 			for (int joint : skin.joints) {
 				skinObject.jointMatrices[joint] =
 					skinObject.globalJointTransforms[joint] * skinObject.inverseBindMatrices[joint] ;
 			}
-
-
-			// ----------------------------------------------
-
 			skinObjects.push_back(skinObject);
 		}
+		tinygltf::Skin skin = model.skins[0];
+		std::vector<glm::mat4> nodeTransforms(skin.joints.size());
+		for (size_t k = 0; k < nodeTransforms.size(); ++k) {
+			nodeTransforms[k] = glm::mat4(1.0);
+		}
+		std::vector<glm::mat4> globalNodeTransforms(skin.joints.size());
+		int rootIndex = skin.joints[0];
+		glm::mat4 parentTransform(1.0f);
+		computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, globalNodeTransforms);
+		globalTransforms = globalNodeTransforms;
 		return skinObjects;
 	}
 
@@ -324,7 +329,7 @@ struct MyBot {
 
 	void updateSkinning(const std::vector<glm::mat4> &nodeTransforms) {
 		for (int j = 0; j < skinObjects.size(); ++j) {
-			SkinObject skinObject = skinObjects[j];
+			SkinObject& skinObject = skinObjects[j];
 
 			const tinygltf::Skin &skin = model.skins[j];
 			const tinygltf::Accessor &ibmAccessor = model.accessors[skin.inverseBindMatrices];
@@ -334,10 +339,17 @@ struct MyBot {
 			const glm::mat4 *inverseBindMatrices = reinterpret_cast<const glm::mat4*>(
 				&ibmBuffer.data[ibmBufferView.byteOffset + ibmAccessor.byteOffset]);
 
+			//recompute joint matrices
 			for (size_t i = 0; i < skin.joints.size(); ++i) {
 				int jointNodeIndex = skin.joints[i];
-				skinObject.jointMatrices[i] = nodeTransforms[jointNodeIndex] * inverseBindMatrices[i];
+				skinObject.jointMatrices[jointNodeIndex] = nodeTransforms[jointNodeIndex] * inverseBindMatrices[jointNodeIndex];
 			}
+			//const tinygltf::Skin &skin = model.skins[0];
+
+			int rootIndex = skin.joints[0];
+			glm::mat4 parentTransform(1.0f);
+			computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, globalTransforms);
+
 		}
 
 
@@ -356,6 +368,11 @@ struct MyBot {
 			for (size_t i = 0; i < nodeTransforms.size(); ++i) {
 				nodeTransforms[i] = glm::mat4(1.0);
 			}
+
+			//int rootIndex = skin.joints[0];
+			//glm::mat4 parentTransform(1.0f);
+			//computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, globalTransforms);
+
 			updateAnimation(model, animation, animationObject, time, nodeTransforms);
 			updateSkinning(nodeTransforms);
 		}
@@ -412,6 +429,7 @@ struct MyBot {
 
 		// Get a handle for GLSL variables
 		mvpMatrixID = glGetUniformLocation(programID, "MVP");
+		jointMatricesID = glGetUniformLocation(programID, "jointMatrices");
 		lightPositionID = glGetUniformLocation(programID, "lightPosition");
 		lightIntensityID = glGetUniformLocation(programID, "lightIntensity");
 	}
@@ -562,29 +580,35 @@ struct MyBot {
 
 	void render(glm::mat4 cameraMatrix) {
 		glUseProgram(programID);
-		
 		// Set camera
 		glm::mat4 mvp = cameraMatrix;
 		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
 
+		SkinObject skinObject = skinObjects[0];
+		//printJointMatrices(skinObject.jointMatrices);
+		//if (!skinObject.jointMatrices.empty()) {
+			glUniformMatrix4fv(jointMatricesID, skinObject.jointMatrices.size(), GL_FALSE, &skinObject.jointMatrices[0][0][0]);
+		//}
 		// -----------------------------------------------------------------
-		// TODO: Set animation data for linear blend skinning in shader
-		// -----------------------------------------------------------------
-		for (const auto &skinObject : skinObjects) {
-			if (!skinObject.jointMatrices.empty()) {
-				glUniformMatrix4fv(jointMatricesID, skinObject.jointMatrices.size(), GL_FALSE, &skinObject.jointMatrices[0][0][0]);
-			}
-		}
-		
-
-		// -----------------------------------------------------------------
-
 		// Set light data 
 		glUniform3fv(lightPositionID, 1, &lightPosition[0]);
 		glUniform3fv(lightIntensityID, 1, &lightIntensity[0]);
 
 		// Draw the GLTF model
 		drawModel(primitiveObjects, model);
+	}
+
+	void printJointMatrices(const std::vector<glm::mat4>& jointMatrices) {
+		for (size_t i = 0; i < jointMatrices.size(); ++i) {
+			std::cout << "Matrix " << i << ":" << std::endl;
+			for (int row = 0; row < 4; ++row) {
+				for (int col = 0; col < 4; ++col) {
+					std::cout << jointMatrices[i][row][col] << " ";
+				}
+				std::cout << std::endl; // End of a matrix row
+			}
+			std::cout << std::endl; // Separation between matrices
+		}
 	}
 
 	void cleanup() {
