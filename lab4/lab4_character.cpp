@@ -163,7 +163,7 @@ struct MyBot {
 			}
 
 			assert(skin.joints.size() == accessor.count);
-
+            //todo add loop to populate globalJointTransforms
 			skinObject.globalJointTransforms.resize(skin.joints.size());
 			skinObject.jointMatrices.resize(skin.joints.size());
 			for (int joint : skin.joints) {
@@ -180,6 +180,7 @@ struct MyBot {
 		std::vector<glm::mat4> globalNodeTransforms(skin.joints.size());
 		int rootIndex = skin.joints[0];
 		glm::mat4 parentTransform(1.0f);
+        //todo remove globalTransforms
 		computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, globalNodeTransforms);
 		globalTransforms = globalNodeTransforms;
 		return skinObjects;

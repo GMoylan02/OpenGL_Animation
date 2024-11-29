@@ -25,6 +25,7 @@ void main() {
     gl_Position =  MVP * skinMatrix * vec4(vertexPosition, 1.0);
 
     // World-space geometry
-    worldPosition = vertexPosition;
-    worldNormal = vertexNormal;
+
+    worldPosition = (skinMatrix * vec4(vertexPosition, 1.0)).xyz;
+    worldNormal = normalize(mat3(transpose(inverse(skinMatrix))) * vertexNormal));
 }
