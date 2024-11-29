@@ -28,7 +28,7 @@ static int windowHeight = 768;
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mode);
 
 // Camera
-static glm::vec3 eye_center(0.0f, 100.0f, 800.0f);
+static glm::vec3 eye_center(0.0f, 100.0f, 300.0f);
 static glm::vec3 lookat(0.0f, 0.0f, 0.0f);
 static glm::vec3 up(0.0f, 1.0f, 0.0f);
 static float FoV = 45.0f;
@@ -43,39 +43,183 @@ static glm::vec3 lightPosition(-275.0f, 500.0f, 800.0f);
 static bool playAnimation = true;
 static float playbackSpeed = 2.0f;
 
-struct MyBot {
-	// Shader variable IDs
-	GLuint mvpMatrixID;
-	GLuint jointMatricesID;
-	GLuint lightPositionID;
-	GLuint lightIntensityID;
-	GLuint programID;
-	GLuint jointIndicesID;
-	GLuint jointWeightsID;
+// Helper class to render skeleton based on given animation data
+struct Skeleton {
+	
+	const std::string vertexShader = R"(
+	#version 330 core
 
+	layout(location = 0) in vec3 vertexPosition;
+
+	uniform mat4 MVP;
+
+	void main() {
+		gl_Position =  MVP * vec4(vertexPosition, 1);
+	}
+	)";
+
+	const std::string fragmentShader = R"(
+	#version 330 core
+
+	out vec3 finalColor;
+
+	void main()
+	{
+		finalColor = vec3(0.2, 0.8, 0);
+	}
+	)";
+
+	GLuint programID;
+    GLuint mvpMatrixID;
+	GLuint sphereVAO, sphereVBO, sphereEBO;
+	int sphereIndexCount = 0;
+
+	void initialize() {
+		createSphereMesh(1.0f, 8, 8);
+
+        programID = LoadShadersFromString(vertexShader, fragmentShader);
+		if (programID == 0)
+		{
+			std::cerr << "Failed to load shaders." << std::endl;
+		}
+
+		mvpMatrixID = glGetUniformLocation(programID, "MVP");
+	}
+
+	void createSphereMesh(float radius, int sectorCount, int stackCount) {
+		std::vector<GLfloat> vertices;
+		std::vector<GLuint> indices;
+		
+		float x, y, z, xy;                            // vertex position
+		float sectorStep = 2 * M_PI / sectorCount;
+		float stackStep = M_PI / stackCount;
+		float sectorAngle, stackAngle;
+
+		for (int i = 0; i <= stackCount; ++i) {
+			stackAngle = M_PI / 2 - i * stackStep;    // from pi/2 to -pi/2
+			xy = radius * cosf(stackAngle);           // r * cos(u)
+			z = radius * sinf(stackAngle);            // r * sin(u)
+
+			for (int j = 0; j <= sectorCount; ++j) {
+				sectorAngle = j * sectorStep;         // from 0 to 2pi
+				x = xy * cosf(sectorAngle);           // x = r * cos(u) * cos(v)
+				y = xy * sinf(sectorAngle);           // y = r * cos(u) * sin(v)
+
+				vertices.push_back(x);
+				vertices.push_back(y);
+				vertices.push_back(z);
+			}
+		}
+
+		for (int i = 0; i < stackCount; ++i) {
+			int k1 = i * (sectorCount + 1);
+			int k2 = k1 + sectorCount + 1;
+
+			for (int j = 0; j < sectorCount; ++j, ++k1, ++k2) {
+				if (i != 0) {
+					indices.push_back(k1);
+					indices.push_back(k2);
+					indices.push_back(k1 + 1);
+				}
+
+				if (i != (stackCount - 1)) {
+					indices.push_back(k1 + 1);
+					indices.push_back(k2);
+					indices.push_back(k2 + 1);
+				}
+			}
+		}
+
+		sphereIndexCount = indices.size();
+
+		glGenVertexArrays(1, &sphereVAO);
+		glGenBuffers(1, &sphereVBO);
+		glGenBuffers(1, &sphereEBO);
+
+		glBindVertexArray(sphereVAO);
+
+		glBindBuffer(GL_ARRAY_BUFFER, sphereVBO);
+		glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(GLfloat), vertices.data(), GL_STATIC_DRAW);
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sphereEBO);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(GLuint), indices.data(), GL_STATIC_DRAW);
+
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+		glEnableVertexAttribArray(0);
+
+		glBindVertexArray(0);
+	}
+
+	void renderSphere(const glm::vec3& position, float radius, const glm::mat4& viewProjMatrix) {
+		glm::mat4 modelMatrix = glm::mat4(1.0f); 
+        modelMatrix = glm::translate(modelMatrix, position);
+        modelMatrix = glm::scale(modelMatrix, glm::vec3(radius));
+
+        glm::mat4 mvp = viewProjMatrix * modelMatrix;
+
+		glUseProgram(programID);
+		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
+
+		glBindVertexArray(sphereVAO);
+		glDrawElements(GL_TRIANGLES, sphereIndexCount, GL_UNSIGNED_INT, 0);
+		glBindVertexArray(0);
+	}
+
+	void renderLine(const glm::vec3& start, const glm::vec3& end, const glm::mat4& viewProjMatrix) {
+		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &viewProjMatrix[0][0]);
+
+		GLfloat vertices[] = { start.x, start.y, start.z, end.x, end.y, end.z };
+		GLuint VBO, VAO;
+		glGenVertexArrays(1, &VAO);
+		glGenBuffers(1, &VBO);
+
+		glBindVertexArray(VAO);
+		glBindBuffer(GL_ARRAY_BUFFER, VBO);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), (GLvoid*)0);
+		glEnableVertexAttribArray(0);
+
+		glUseProgram(programID);
+		glBindVertexArray(VAO);
+		glDrawArrays(GL_LINES, 0, 2);
+
+		glBindVertexArray(0);
+		glDeleteBuffers(1, &VBO);
+		glDeleteVertexArrays(1, &VAO);
+	}
+
+	void renderSkeleton(const tinygltf::Model& model, 
+        const tinygltf::Skin &skin, 
+        const std::vector<glm::mat4> &globalTransforms,
+        const glm::mat4& viewProjMatrix) 
+    {
+        if (skin.joints.size() <= 0) return;
+
+		for (size_t j = 0; j < skin.joints.size(); ++j) {
+            int nodeIndex = skin.joints[j];
+            const tinygltf::Node &node = model.nodes[nodeIndex];
+			if (node.translation.size() >= 0) {
+                glm::vec3 jointPosition = 
+                    glm::vec3(globalTransforms[nodeIndex][3]);
+				renderSphere(jointPosition, 2.0f, viewProjMatrix);
+
+				for (const int childIndex : node.children) {
+					const auto& childNode = model.nodes[childIndex];
+					glm::vec3 childPosition = 
+                        glm::vec3(globalTransforms[childIndex][3]);
+					renderLine(jointPosition, childPosition, viewProjMatrix);
+				}
+			}
+		}
+	}
+};
+
+// Our 3D character model
+struct MyBot {
 	tinygltf::Model model;
 
-	// Each VAO corresponds to each mesh primitive in the GLTF model
-	struct PrimitiveObject {
-		GLuint vao;
-		std::map<int, GLuint> vbos;
-	};
-	std::vector<PrimitiveObject> primitiveObjects;
-
-	// Skinning 
-	struct SkinObject {
-		// Transforms the geometry into the space of the respective joint
-		std::vector<glm::mat4> inverseBindMatrices;  
-
-		// Transforms the geometry following the movement of the joints
-		std::vector<glm::mat4> globalJointTransforms;
-
-		// Combined transforms
-		std::vector<glm::mat4> jointMatrices;
-	};
-	std::vector<SkinObject> skinObjects;
-
-	// Animation 
+	// Animation data
 	struct SamplerObject {
 		std::vector<float> input;
 		std::vector<glm::vec4> output;
@@ -87,11 +231,19 @@ struct MyBot {
 		int targetNode;
 	}; 
 	struct AnimationObject {
-		std::vector<SamplerObject> samplers;	// Animation data
+		std::vector<SamplerObject> samplers;
 	};
 	std::vector<AnimationObject> animationObjects;
-	//std::vector<glm::mat4> globalTransforms;
 
+	// The skeleton class for rendering the skeleton given the transforms 
+	// obtained from the animation object
+    Skeleton skeleton;
+
+	// The current global transforms for each joint
+	// Update this will result in skeleton in different poses
+    std::vector<glm::mat4> globalTransforms;
+
+	// Parse the transformation data at a node and turn into a 4x4 matrix
 	glm::mat4 getNodeTransform(const tinygltf::Node& node) {
 		glm::mat4 transform(1.0f); 
 
@@ -135,63 +287,6 @@ struct MyBot {
 		for (int childIndex : currentNode.children) {
 			computeGlobalNodeTransform(model, localTransforms, childIndex, currentTransform, globalTransforms);
 		}
-	}
-
-	std::vector<SkinObject> prepareSkinning(const tinygltf::Model &model) {
-		std::vector<SkinObject> skinObjects;
-
-		// In our Blender exporter, the default number of joints that may influence a vertex is set to 4, just for convenient implementation in shaders.
-
-		for (size_t i = 0; i < model.skins.size(); i++) {
-			SkinObject skinObject;
-
-			const tinygltf::Skin &skin = model.skins[i];
-
-			// Read inverseBindMatrices
-			const tinygltf::Accessor &accessor = model.accessors[skin.inverseBindMatrices];
-			assert(accessor.type == TINYGLTF_TYPE_MAT4);
-			const tinygltf::BufferView &bufferView = model.bufferViews[accessor.bufferView];
-			const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
-			const float *ptr = reinterpret_cast<const float *>(
-            	buffer.data.data() + accessor.byteOffset + bufferView.byteOffset);
-			
-			skinObject.inverseBindMatrices.resize(accessor.count);
-			for (size_t j = 0; j < accessor.count; j++) {
-				float m[16];
-				memcpy(m, ptr + j * 16, 16 * sizeof(float));
-				skinObject.inverseBindMatrices[j] = glm::make_mat4(m);
-			}
-
-			assert(skin.joints.size() == accessor.count);
-            //todo add loop to populate globalJointTransforms
-
-			skinObject.globalJointTransforms.resize(skin.joints.size(), glm::mat4(1.0f));
-			skinObject.jointMatrices.resize(skin.joints.size());
-			for (int joint : skin.joints) {
-				skinObject.jointMatrices[joint] =
-					skinObject.globalJointTransforms[joint] * skinObject.inverseBindMatrices[joint] ;
-			}
-			skinObjects.push_back(skinObject);
-		}
-		tinygltf::Skin skin = model.skins[0];
-		std::vector<glm::mat4> nodeTransforms(skin.joints.size());
-		for (size_t k = 0; k < nodeTransforms.size(); ++k) {
-			nodeTransforms[k] = glm::mat4(1.0);
-		}
-
-		// Compute local transforms at each node
-		int rootNodeIndex = skin.joints[0];
-		std::vector<glm::mat4> localNodeTransforms(skin.joints.size());
-		computeLocalNodeTransform(model, rootNodeIndex, localNodeTransforms);
-
-		std::vector<glm::mat4> globalNodeTransforms(skin.joints.size());
-		int rootIndex = skin.joints[0];
-		glm::mat4 parentTransform(1.0f);
-        //todo remove globalTransforms, use globalJointTransforms instead
-		computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, globalNodeTransforms);
-		//todo this is almost certainly wrong
-		this->skinObjects[0].globalJointTransforms = globalNodeTransforms;
-		return skinObjects;
 	}
 
 	int findKeyframeIndex(const std::vector<float>& times, float animationTime) 
@@ -238,7 +333,7 @@ struct MyBot {
 
 				const unsigned char *inputPtr = &inputBuffer.data[inputBufferView.byteOffset + inputAccessor.byteOffset];
 				const float *inputBuf = reinterpret_cast<const float*>(inputPtr);
-
+				
 				// Read input (time) values
 				int stride = inputAccessor.ByteStride(inputBufferView);
 				for (size_t i = 0; i < inputAccessor.count; ++i) {
@@ -279,19 +374,19 @@ struct MyBot {
 		return animationObjects;
 	}
 
-		void updateAnimation(
-		const tinygltf::Model &model,
-		const tinygltf::Animation &anim,
-		const AnimationObject &animationObject,
+	void updateAnimation(
+		const tinygltf::Model &model, 
+		const tinygltf::Animation &anim, 
+		const AnimationObject &animationObject, 
 		float time,
-		std::vector<glm::mat4> &nodeTransforms)
+		std::vector<glm::mat4> &nodeTransforms) 
 	{
-		// There are many channels so we have to accumulate the transforms
+		// There are many channels so we have to accumulate the transforms 
 		for (const auto &channel : anim.channels) {
-
+			
 			int targetNodeIndex = channel.target_node;
 			const auto &sampler = anim.samplers[channel.sampler];
-
+			
 			// Access output (value) data for the channel
 			const tinygltf::Accessor &outputAccessor = model.accessors[sampler.output];
 			const tinygltf::BufferView &outputBufferView = model.bufferViews[outputAccessor.bufferView];
@@ -336,61 +431,23 @@ struct MyBot {
 		}
 	}
 
-	void updateSkinning(const std::vector<glm::mat4> &nodeTransforms) {
-		for (int j = 0; j < skinObjects.size(); ++j) {
-			SkinObject& skinObject = skinObjects[j];
-
-			const tinygltf::Skin &skin = model.skins[j];
-			const tinygltf::Accessor &ibmAccessor = model.accessors[skin.inverseBindMatrices];
-			const tinygltf::BufferView &ibmBufferView = model.bufferViews[ibmAccessor.bufferView];
-			const tinygltf::Buffer &ibmBuffer = model.buffers[ibmBufferView.buffer];
-
-			const glm::mat4 *inverseBindMatrices = reinterpret_cast<const glm::mat4*>(
-				&ibmBuffer.data[ibmBufferView.byteOffset + ibmAccessor.byteOffset]);
-
-			//recompute joint matrices
-			for (size_t i = 0; i < skin.joints.size(); ++i) {
-				int jointNodeIndex = skin.joints[i];
-				skinObject.jointMatrices[jointNodeIndex] = nodeTransforms[jointNodeIndex] * inverseBindMatrices[jointNodeIndex];
-			}
-			//const tinygltf::Skin &skin = model.skins[0];
-
-			int rootIndex = skin.joints[0];
-			glm::mat4 parentTransform(1.0f);
-			//todo this is almost c ertainly wrong!!!
-			computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, skinObject.globalJointTransforms);
-
-		}
-
-
-		// -------------------------------------------------
-		// TODO: Recompute joint matrices 
-		// -------------------------------------------------
-	}
-
 	void update(float time) {
+
 		if (model.animations.size() > 0) {
 			const tinygltf::Animation &animation = model.animations[0];
 			const AnimationObject &animationObject = animationObjects[0];
 
-			const tinygltf::Skin &skin = model.skins[0];
+            const tinygltf::Skin &skin = model.skins[0];
 			std::vector<glm::mat4> nodeTransforms(skin.joints.size());
 			for (size_t i = 0; i < nodeTransforms.size(); ++i) {
 				nodeTransforms[i] = glm::mat4(1.0);
 			}
 
-			//int rootIndex = skin.joints[0];
-			//glm::mat4 parentTransform(1.0f);
-			//computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, globalTransforms);
-
 			updateAnimation(model, animation, animationObject, time, nodeTransforms);
-			updateSkinning(nodeTransforms);
+			int rootIndex = skin.joints[0];
+			glm::mat4 parentTransform(1.0f);
+			computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, globalTransforms);
 		}
-
-		// -------------------------------------------------
-		// TODO: your code here
-		// -------------------------------------------------
-
 	}
 
 	bool loadModel(tinygltf::Model &model, const char *filename) {
@@ -421,208 +478,35 @@ struct MyBot {
 			return;
 		}
 
-		// Prepare buffers for rendering 
-		primitiveObjects = bindModel(model);
-
-		// Prepare joint matrices
-		skinObjects = prepareSkinning(model);
-
 		// Prepare animation data 
 		animationObjects = prepareAnimation(model);
 
-		// Create and compile our GLSL program from the shaders
-		programID = LoadShadersFromFile("../lab4/shader/bot.vert", "../lab4/shader/bot.frag");
-		if (programID == 0)
-		{
-			std::cerr << "Failed to load shaders." << std::endl;
-		}
+		// Just take the first skin/skeleton model
+        const tinygltf::Skin &skin = model.skins[0];
 
-		// Get a handle for GLSL variables
-		mvpMatrixID = glGetUniformLocation(programID, "MVP");
-		jointMatricesID = glGetUniformLocation(programID, "jointMatrices");
-		lightPositionID = glGetUniformLocation(programID, "lightPosition");
-		lightIntensityID = glGetUniformLocation(programID, "lightIntensity");
-	}
+        // Compute local transforms at each node
+        int rootNodeIndex = skin.joints[0];
+        std::vector<glm::mat4> localNodeTransforms(skin.joints.size());
+        computeLocalNodeTransform(model, rootNodeIndex, localNodeTransforms);
 
-	void bindMesh(std::vector<PrimitiveObject> &primitiveObjects,
-				tinygltf::Model &model, tinygltf::Mesh &mesh) {
-
-		std::map<int, GLuint> vbos;
-		for (size_t i = 0; i < model.bufferViews.size(); ++i) {
-			const tinygltf::BufferView &bufferView = model.bufferViews[i];
-
-			int target = bufferView.target;
-			
-			if (bufferView.target == 0) { 
-				// The bufferView with target == 0 in our model refers to 
-				// the skinning weights, for 25 joints, each 4x4 matrix (16 floats), totaling to 400 floats or 1600 bytes. 
-				// So it is considered safe to skip the warning.
-				//std::cout << "WARN: bufferView.target is zero" << std::endl;
-				continue;
-			}
-
-			const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
-			GLuint vbo;
-			glGenBuffers(1, &vbo);
-			glBindBuffer(target, vbo);
-			glBufferData(target, bufferView.byteLength,
-						&buffer.data.at(0) + bufferView.byteOffset, GL_STATIC_DRAW);
-			
-			vbos[i] = vbo;
-		}
-
-		// Each mesh can contain several primitives (or parts), each we need to 
-		// bind to an OpenGL vertex array object
-		for (size_t i = 0; i < mesh.primitives.size(); ++i) {
-
-			tinygltf::Primitive primitive = mesh.primitives[i];
-			tinygltf::Accessor indexAccessor = model.accessors[primitive.indices];
-
-			GLuint vao;
-			glGenVertexArrays(1, &vao);
-			glBindVertexArray(vao);
-
-			for (auto &attrib : primitive.attributes) {
-				tinygltf::Accessor accessor = model.accessors[attrib.second];
-				int byteStride =
-					accessor.ByteStride(model.bufferViews[accessor.bufferView]);
-				glBindBuffer(GL_ARRAY_BUFFER, vbos[accessor.bufferView]);
-
-				int size = 1;
-				if (accessor.type != TINYGLTF_TYPE_SCALAR) {
-					size = accessor.type;
-				}
-
-				int vaa = -1;
-				if (attrib.first.compare("POSITION") == 0) vaa = 0;
-				if (attrib.first.compare("NORMAL") == 0) vaa = 1;
-				if (attrib.first.compare("TEXCOORD_0") == 0) vaa = 2;
-				if (attrib.first.compare("JOINTS_0") == 0) vaa = 3;
-				if (attrib.first.compare("WEIGHTS_0") == 0) vaa = 4;
-				if (vaa > -1) {
-					glEnableVertexAttribArray(vaa);
-					glVertexAttribPointer(vaa, size, accessor.componentType,
-										accessor.normalized ? GL_TRUE : GL_FALSE,
-										byteStride, BUFFER_OFFSET(accessor.byteOffset));
-				} else {
-					std::cout << "vaa missing: " << attrib.first << std::endl;
-				}
-			}
-
-			// Record VAO for later use
-			PrimitiveObject primitiveObject;
-			primitiveObject.vao = vao;
-			primitiveObject.vbos = vbos;
-			primitiveObjects.push_back(primitiveObject);
-
-			glBindVertexArray(0);
-		}
-	}
-
-	void bindModelNodes(std::vector<PrimitiveObject> &primitiveObjects, 
-						tinygltf::Model &model,
-						tinygltf::Node &node) {
-		// Bind buffers for the current mesh at the node
-		if ((node.mesh >= 0) && (node.mesh < model.meshes.size())) {
-			bindMesh(primitiveObjects, model, model.meshes[node.mesh]);
-		}
-
-		// Recursive into children nodes
-		for (size_t i = 0; i < node.children.size(); i++) {
-			assert((node.children[i] >= 0) && (node.children[i] < model.nodes.size()));
-			bindModelNodes(primitiveObjects, model, model.nodes[node.children[i]]);
-		}
-	}
-
-	std::vector<PrimitiveObject> bindModel(tinygltf::Model &model) {
-		std::vector<PrimitiveObject> primitiveObjects;
-
-		const tinygltf::Scene &scene = model.scenes[model.defaultScene];
-		for (size_t i = 0; i < scene.nodes.size(); ++i) {
-			assert((scene.nodes[i] >= 0) && (scene.nodes[i] < model.nodes.size()));
-			bindModelNodes(primitiveObjects, model, model.nodes[scene.nodes[i]]);
-		}
-
-		return primitiveObjects;
-	}
-
-	void drawMesh(const std::vector<PrimitiveObject> &primitiveObjects,
-				tinygltf::Model &model, tinygltf::Mesh &mesh) {
-		
-		for (size_t i = 0; i < mesh.primitives.size(); ++i) 
-		{
-			GLuint vao = primitiveObjects[i].vao;
-			std::map<int, GLuint> vbos = primitiveObjects[i].vbos;
-
-			glBindVertexArray(vao);
-
-			tinygltf::Primitive primitive = mesh.primitives[i];
-			tinygltf::Accessor indexAccessor = model.accessors[primitive.indices];
-
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, vbos.at(indexAccessor.bufferView));
-
-			glDrawElements(primitive.mode, indexAccessor.count,
-						indexAccessor.componentType,
-						BUFFER_OFFSET(indexAccessor.byteOffset));
-
-			glBindVertexArray(0);
-		}
-	}
-
-	void drawModelNodes(const std::vector<PrimitiveObject>& primitiveObjects,
-						tinygltf::Model &model, tinygltf::Node &node) {
-		// Draw the mesh at the node, and recursively do so for children nodes
-		if ((node.mesh >= 0) && (node.mesh < model.meshes.size())) {
-			drawMesh(primitiveObjects, model, model.meshes[node.mesh]);
-		}
-		for (size_t i = 0; i < node.children.size(); i++) {
-			drawModelNodes(primitiveObjects, model, model.nodes[node.children[i]]);
-		}
-	}
-	void drawModel(const std::vector<PrimitiveObject>& primitiveObjects,
-				tinygltf::Model &model) {
-		// Draw all nodes
-		const tinygltf::Scene &scene = model.scenes[model.defaultScene];
-		for (size_t i = 0; i < scene.nodes.size(); ++i) {
-			drawModelNodes(primitiveObjects, model, model.nodes[scene.nodes[i]]);
-		}
+        // Compute global transforms at each node
+        glm::mat4 parentTransform(1.0f);
+        std::vector<glm::mat4> globalNodeTransforms(skin.joints.size());
+        computeGlobalNodeTransform(model, localNodeTransforms, rootNodeIndex, parentTransform, globalNodeTransforms);
+        
+        globalTransforms = globalNodeTransforms;
+        skeleton.initialize();
 	}
 
 	void render(glm::mat4 cameraMatrix) {
-		glUseProgram(programID);
-		// Set camera
-		glm::mat4 mvp = cameraMatrix;
-		glUniformMatrix4fv(mvpMatrixID, 1, GL_FALSE, &mvp[0][0]);
 
-		SkinObject skinObject = skinObjects[0];
-		//printJointMatrices(skinObject.jointMatrices);
-		//if (!skinObject.jointMatrices.empty()) {
-			glUniformMatrix4fv(jointMatricesID, skinObject.jointMatrices.size(), GL_FALSE, &skinObject.jointMatrices[0][0][0]);
-		//}
-		// -----------------------------------------------------------------
-		// Set light data 
-		glUniform3fv(lightPositionID, 1, &lightPosition[0]);
-		glUniform3fv(lightIntensityID, 1, &lightIntensity[0]);
-
-		// Draw the GLTF model
-		drawModel(primitiveObjects, model);
-	}
-
-	void printJointMatrices(const std::vector<glm::mat4>& jointMatrices) {
-		for (size_t i = 0; i < jointMatrices.size(); ++i) {
-			std::cout << "Matrix " << i << ":" << std::endl;
-			for (int row = 0; row < 4; ++row) {
-				for (int col = 0; col < 4; ++col) {
-					std::cout << jointMatrices[i][row][col] << " ";
-				}
-				std::cout << std::endl; // End of a matrix row
-			}
-			std::cout << std::endl; // Separation between matrices
-		}
+        const tinygltf::Skin &skin = model.skins[0];
+        skeleton.renderSkeleton(model, skin, globalTransforms, cameraMatrix);
+        
 	}
 
 	void cleanup() {
-		glDeleteProgram(programID);
+
 	}
 }; 
 
