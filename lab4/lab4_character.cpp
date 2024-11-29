@@ -164,33 +164,29 @@ struct MyBot {
 
 			assert(skin.joints.size() == accessor.count);
             //todo add loop to populate globalJointTransforms
-
 			skinObject.globalJointTransforms.resize(skin.joints.size(), glm::mat4(1.0f));
 			skinObject.jointMatrices.resize(skin.joints.size());
-			for (int joint : skin.joints) {
-				skinObject.jointMatrices[joint] =
-					skinObject.globalJointTransforms[joint] * skinObject.inverseBindMatrices[joint] ;
+
+			int rootNodeIndex = skin.joints[0];
+			std::vector<glm::mat4> localNodeTransforms(skin.joints.size());
+			computeLocalNodeTransform(model, rootNodeIndex, localNodeTransforms);
+
+			glm::mat4 parentTransform(1.0f);
+			std::vector<glm::mat4> globalNodeTransforms(skin.joints.size());
+			computeGlobalNodeTransform(model, localNodeTransforms, rootNodeIndex, parentTransform, globalNodeTransforms);
+
+			for (size_t j = 0; j < skin.joints.size(); j++) {
+				int jointNodeIndex = skin.joints[j];
+				skinObject.globalJointTransforms[j] = globalNodeTransforms[j];
+			}
+
+			for (size_t j = 0; j < skin.joints.size(); j++) {
+				skinObject.jointMatrices[j] = skinObject.globalJointTransforms[j] * skinObject.inverseBindMatrices[j];
 			}
 			skinObjects.push_back(skinObject);
 		}
-		tinygltf::Skin skin = model.skins[0];
-		std::vector<glm::mat4> nodeTransforms(skin.joints.size());
-		for (size_t k = 0; k < nodeTransforms.size(); ++k) {
-			nodeTransforms[k] = glm::mat4(1.0);
-		}
 
 		// Compute local transforms at each node
-		int rootNodeIndex = skin.joints[0];
-		std::vector<glm::mat4> localNodeTransforms(skin.joints.size());
-		computeLocalNodeTransform(model, rootNodeIndex, localNodeTransforms);
-
-		std::vector<glm::mat4> globalNodeTransforms(skin.joints.size());
-		int rootIndex = skin.joints[0];
-		glm::mat4 parentTransform(1.0f);
-        //todo remove globalTransforms, use globalJointTransforms instead
-		computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, globalNodeTransforms);
-		//todo this is almost certainly wrong
-		this->skinObjects[0].globalJointTransforms = globalNodeTransforms;
 		return skinObjects;
 	}
 
@@ -339,7 +335,6 @@ struct MyBot {
 	void updateSkinning(const std::vector<glm::mat4> &nodeTransforms) {
 		for (int j = 0; j < skinObjects.size(); ++j) {
 			SkinObject& skinObject = skinObjects[j];
-
 			const tinygltf::Skin &skin = model.skins[j];
 			const tinygltf::Accessor &ibmAccessor = model.accessors[skin.inverseBindMatrices];
 			const tinygltf::BufferView &ibmBufferView = model.bufferViews[ibmAccessor.bufferView];
@@ -350,14 +345,13 @@ struct MyBot {
 
 			//recompute joint matrices
 			for (size_t i = 0; i < skin.joints.size(); ++i) {
-				int jointNodeIndex = skin.joints[i];
-				skinObject.jointMatrices[jointNodeIndex] = nodeTransforms[jointNodeIndex] * inverseBindMatrices[jointNodeIndex];
+				//int jointNodeIndex = skin.joints[i];
+				skinObject.jointMatrices[i] = nodeTransforms[i] * inverseBindMatrices[i];
 			}
 			//const tinygltf::Skin &skin = model.skins[0];
 
 			int rootIndex = skin.joints[0];
 			glm::mat4 parentTransform(1.0f);
-			//todo this is almost c ertainly wrong!!!
 			computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, skinObject.globalJointTransforms);
 
 		}

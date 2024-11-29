@@ -27,5 +27,5 @@ void main() {
     // World-space geometry
 
     worldPosition = (skinMatrix * vec4(vertexPosition, 1.0)).xyz;
-    worldNormal = normalize(mat3(transpose(inverse(skinMatrix))) * vertexNormal));
+    worldNormal = normalize(mat3(transpose(inverse(skinMatrix))) * vertexNormal);
 }
