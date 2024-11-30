@@ -163,7 +163,6 @@ struct MyBot {
 			}
 
 			assert(skin.joints.size() == accessor.count);
-            //todo add loop to populate globalJointTransforms
 			skinObject.globalJointTransforms.resize(skin.joints.size(), glm::mat4(1.0f));
 			skinObject.jointMatrices.resize(skin.joints.size());
 
@@ -177,7 +176,7 @@ struct MyBot {
 
 			for (size_t j = 0; j < skin.joints.size(); j++) {
 				int jointNodeIndex = skin.joints[j];
-				skinObject.globalJointTransforms[j] = globalNodeTransforms[j];
+				skinObject.globalJointTransforms[j] = globalNodeTransforms[jointNodeIndex];
 			}
 
 			for (size_t j = 0; j < skin.joints.size(); j++) {
@@ -333,58 +332,37 @@ struct MyBot {
 	}
 
 	void updateSkinning(const std::vector<glm::mat4> &nodeTransforms) {
+		// -------------------------------------------------
+		// TODO: Recompute joint matrices
+		// -------------------------------------------------
 		for (int j = 0; j < skinObjects.size(); ++j) {
 			SkinObject& skinObject = skinObjects[j];
 			const tinygltf::Skin &skin = model.skins[j];
-			const tinygltf::Accessor &ibmAccessor = model.accessors[skin.inverseBindMatrices];
-			const tinygltf::BufferView &ibmBufferView = model.bufferViews[ibmAccessor.bufferView];
-			const tinygltf::Buffer &ibmBuffer = model.buffers[ibmBufferView.buffer];
-
-			const glm::mat4 *inverseBindMatrices = reinterpret_cast<const glm::mat4*>(
-				&ibmBuffer.data[ibmBufferView.byteOffset + ibmAccessor.byteOffset]);
-
 			//recompute joint matrices
 			for (size_t i = 0; i < skin.joints.size(); ++i) {
 				//int jointNodeIndex = skin.joints[i];
-				skinObject.jointMatrices[i] = nodeTransforms[i] * inverseBindMatrices[i];
+				skinObject.jointMatrices[i] = nodeTransforms[i] * skinObject.inverseBindMatrices[i];
 			}
-			//const tinygltf::Skin &skin = model.skins[0];
-
-			int rootIndex = skin.joints[0];
-			glm::mat4 parentTransform(1.0f);
-			computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, skinObject.globalJointTransforms);
-
 		}
-
-
-		// -------------------------------------------------
-		// TODO: Recompute joint matrices 
-		// -------------------------------------------------
 	}
 
 	void update(float time) {
-		if (model.animations.size() > 0) {
-			const tinygltf::Animation &animation = model.animations[0];
-			const AnimationObject &animationObject = animationObjects[0];
+		const tinygltf::Animation &animation = model.animations[0];
+		const AnimationObject &animationObject = animationObjects[0];
+		const tinygltf::Skin &skin = model.skins[0];
 
-			const tinygltf::Skin &skin = model.skins[0];
-			std::vector<glm::mat4> nodeTransforms(skin.joints.size());
-			for (size_t i = 0; i < nodeTransforms.size(); ++i) {
-				nodeTransforms[i] = glm::mat4(1.0);
-			}
+		int rootNodeIndex = skin.joints[0];
+		std::vector<glm::mat4> localNodeTransforms(skin.joints.size());
+		computeLocalNodeTransform(model, rootNodeIndex, localNodeTransforms);
 
-			//int rootIndex = skin.joints[0];
-			//glm::mat4 parentTransform(1.0f);
-			//computeGlobalNodeTransform(model, nodeTransforms, rootIndex, parentTransform, globalTransforms);
+		glm::mat4 parentTransform(1.0f);
+		computeGlobalNodeTransform(model, localNodeTransforms, rootNodeIndex, parentTransform, skinObjects[0].globalJointTransforms);
 
-			updateAnimation(model, animation, animationObject, time, nodeTransforms);
-			updateSkinning(nodeTransforms);
-		}
-
+		//updateAnimation(model, animation, animationObject, time, skinObjects[0].globalJointTransforms);
+		updateSkinning(skinObjects[0].globalJointTransforms);
 		// -------------------------------------------------
 		// TODO: your code here
 		// -------------------------------------------------
-
 	}
 
 	bool loadModel(tinygltf::Model &model, const char *filename) {
@@ -590,10 +568,8 @@ struct MyBot {
 
 		SkinObject skinObject = skinObjects[0];
 		//printJointMatrices(skinObject.jointMatrices);
-		//if (!skinObject.jointMatrices.empty()) {
-			glUniformMatrix4fv(jointMatricesID, skinObject.jointMatrices.size(), GL_FALSE, &skinObject.jointMatrices[0][0][0]);
-		//}
-		// -----------------------------------------------------------------
+
+		glUniformMatrix4fv(jointMatricesID, skinObject.jointMatrices.size(), GL_FALSE, &skinObject.jointMatrices[0][0][0]);
 		// Set light data 
 		glUniform3fv(lightPositionID, 1, &lightPosition[0]);
 		glUniform3fv(lightIntensityID, 1, &lightIntensity[0]);
