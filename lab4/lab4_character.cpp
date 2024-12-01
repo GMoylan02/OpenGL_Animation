@@ -28,7 +28,7 @@ static int windowHeight = 768;
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mode);
 
 // Camera
-static glm::vec3 eye_center(0.0f, 100.0f, 800.0f);
+static glm::vec3 eye_center(0.0f, 100.0f, 300.0f);
 static glm::vec3 lookat(0.0f, 0.0f, 0.0f);
 static glm::vec3 up(0.0f, 1.0f, 0.0f);
 static float FoV = 45.0f;
@@ -339,30 +339,35 @@ struct MyBot {
 			SkinObject& skinObject = skinObjects[j];
 			const tinygltf::Skin &skin = model.skins[j];
 			//recompute joint matrices
-			for (size_t i = 0; i < skin.joints.size(); ++i) {
-				//int jointNodeIndex = skin.joints[i];
-				skinObject.jointMatrices[i] = nodeTransforms[i] * skinObject.inverseBindMatrices[i];
+			for (size_t i = 0; i < skinObject.globalJointTransforms.size(); ++i) {
+				int jointNodeIndex = skin.joints[i];
+				skinObject.jointMatrices[i] = nodeTransforms[jointNodeIndex] * skinObject.inverseBindMatrices[i];
 			}
 		}
 	}
 
 	void update(float time) {
-		const tinygltf::Animation &animation = model.animations[0];
-		const AnimationObject &animationObject = animationObjects[0];
-		const tinygltf::Skin &skin = model.skins[0];
 
-		int rootNodeIndex = skin.joints[0];
-		std::vector<glm::mat4> localNodeTransforms(skin.joints.size());
-		computeLocalNodeTransform(model, rootNodeIndex, localNodeTransforms);
+		// return;
 
-		glm::mat4 parentTransform(1.0f);
-		computeGlobalNodeTransform(model, localNodeTransforms, rootNodeIndex, parentTransform, skinObjects[0].globalJointTransforms);
+		if (model.animations.size() > 0) {
+			const tinygltf::Animation &animation = model.animations[0];
+			const AnimationObject &animationObject = animationObjects[0];
+			const tinygltf::Skin &skin = model.skins[0];
+			std::vector<glm::mat4> nodeTransforms(skin.joints.size());
+			for (size_t i = 0; i < nodeTransforms.size(); ++i) {
+				nodeTransforms[i] = glm::mat4(1.0);
+			}
+			updateAnimation(model, animation, animationObject, time, nodeTransforms);
 
-		//updateAnimation(model, animation, animationObject, time, skinObjects[0].globalJointTransforms);
-		updateSkinning(skinObjects[0].globalJointTransforms);
-		// -------------------------------------------------
-		// TODO: your code here
-		// -------------------------------------------------
+			// TODO
+			// Recompute global transforms
+			int rootNodeIndex = model.skins[0].joints[0];
+			std::vector<glm::mat4> globalNodeTransforms(model.nodes.size(), glm::mat4(1.0f));
+			computeGlobalNodeTransform(model, nodeTransforms, rootNodeIndex, glm::mat4(1.0f), globalNodeTransforms);
+
+			updateSkinning(globalNodeTransforms); // Update joint matrices
+		}
 	}
 
 	bool loadModel(tinygltf::Model &model, const char *filename) {
