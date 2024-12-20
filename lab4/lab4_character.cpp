@@ -332,9 +332,6 @@ struct MyBot {
 	}
 
 	void updateSkinning(const std::vector<glm::mat4> &nodeTransforms) {
-		// -------------------------------------------------
-		// TODO: Recompute joint matrices
-		// -------------------------------------------------
 		for (int j = 0; j < skinObjects.size(); ++j) {
 			SkinObject& skinObject = skinObjects[j];
 			const tinygltf::Skin &skin = model.skins[j];
@@ -360,7 +357,6 @@ struct MyBot {
 			}
 			updateAnimation(model, animation, animationObject, time, nodeTransforms);
 
-			// TODO
 			// Recompute global transforms
 			int rootNodeIndex = model.skins[0].joints[0];
 			std::vector<glm::mat4> globalNodeTransforms(model.nodes.size(), glm::mat4(1.0f));
